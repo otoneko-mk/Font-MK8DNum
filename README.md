@@ -1,5 +1,7 @@
 # Font-MK8DNum
 
+![MK8DNum Preview](MK8DNum.png)
+
 [『マリオカート８デラックス』](https://www.nintendo.com/jp/switch/aabpa/index.html)のデジタル数字風のフォントです。
 
 This is a digital-style font inspired by [Mario Kart 8 Deluxe](https://mariokart8.nintendo.com/).
