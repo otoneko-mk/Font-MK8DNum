@@ -1,103 +1,113 @@
 name: Build and Release MK8DNum
 
 on:
-  push:
-    branches: [main]
+    push:
+        branches: [main]
 
 permissions:
-  contents: write
+    contents: write
 
 concurrency:
-  group: mk8dnum-auto-release
-  cancel-in-progress: false
+    group: mk8dnum-auto-release
+    cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out source and tags
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    release:
+        runs-on: ubuntu-latest
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        steps:
+            - name: Check out source and tags
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - name: Install font build dependency
-        run: python -m pip install -r requirements.txt
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
 
-      - name: Allocate JST release tag
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          today="$(TZ=Asia/Tokyo date +%Y.%m.%d)"
-          max=0
-          while IFS=$'\t' read -r _ ref; do
-            tag="${ref#refs/tags/}"
-            if [[ "$tag" == "$today".* ]]; then
-              suffix="${tag##*.}"
-              if [[ "$suffix" =~ ^[0-9]{2}$ ]]; then
-                num=$((10#$suffix))
-                if ((num > max)); then max=$num; fi
-              fi
-            fi
-          done < <(git ls-remote --refs --tags origin "refs/tags/${today}.*")
-          if ((max >= 99)); then
-            echo "The daily release limit (99) has been reached" >&2
-            exit 1
-          fi
-          printf -v next '%02d' "$((max + 1))"
-          tag="${today}.${next}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $tag"
+            - name: Install font build dependency
+              run: python -m pip install -r requirements.txt
 
-      - name: Build and validate both OTFs
-        env:
-          MK8D_BUILD_TAG: ${{ steps.version.outputs.tag }}
-        run: python build.py
+            - name: Read font version
+              id: version
+              shell: bash
+              run: |
+                  tag="$(python -c 'import build; print(f"v{build.VERSION}")')"
+                  echo "tag=$tag" >> "$GITHUB_OUTPUT"
+                  echo "Release version: $tag"
 
-      - name: Package exactly two fonts
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          python - <<'PYZIP'
-          import os
-          from pathlib import Path
-          from zipfile import ZIP_DEFLATED, ZipFile
-          from fontTools.ttLib import TTFont
+            - name: Check existing release tag
+              id: existing
+              shell: bash
+              env:
+                  RELEASE_TAG: ${{ steps.version.outputs.tag }}
+              run: |
+                  set -euo pipefail
+                  existing="$(git ls-remote --refs --tags origin "refs/tags/${RELEASE_TAG}")"
 
-          root = Path('build/otf')
-          names = ('MK8DNum-Regular.otf', 'MK8DNum-Italic.otf')
-          assert {f.name for f in root.glob('*.otf')} == set(names), 'Unexpected OTF set'
-          tag = os.environ['RELEASE_TAG']
-          for name, style in zip(names, ('Regular', 'Italic')):
-              with TTFont(root / name) as font:
-                  assert font['name'].getDebugName(1) == 'MK8DNum'
-                  assert font['name'].getDebugName(2) == style
-                  assert font['name'].getDebugName(5).endswith('build ' + tag)
-          out = Path('dist') / f'MK8DNum-{tag}.zip'
-          out.parent.mkdir(parents=True, exist_ok=True)
-          with ZipFile(out, 'w', ZIP_DEFLATED, compresslevel=9) as archive:
-              for name in names:
-                  archive.write(root / name, arcname=name)
-          with ZipFile(out) as archive:
-              assert archive.namelist() == list(names)
-              assert archive.testzip() is None
-          print(f'Created {out}')
-          PYZIP
+                  if [[ -n "$existing" ]]; then
+                    echo "exists=true" >> "$GITHUB_OUTPUT"
+                    echo "Tag already exists: $RELEASE_TAG"
+                  else
+                    echo "exists=false" >> "$GITHUB_OUTPUT"
+                  fi
 
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release create "$RELEASE_TAG" "dist/MK8DNum-${RELEASE_TAG}.zip" \
-            --title "$RELEASE_TAG" \
-            --generate-notes \
-            --target "$GITHUB_SHA"
+            - name: Build and validate both OTFs
+              if: steps.existing.outputs.exists == 'false'
+              run: python build.py
+
+            - name: Package exactly two fonts
+              if: steps.existing.outputs.exists == 'false'
+              shell: bash
+              env:
+                  RELEASE_TAG: ${{ steps.version.outputs.tag }}
+              run: |
+                  python - <<'PYZIP'
+                  import os
+                  from pathlib import Path
+                  from zipfile import ZIP_DEFLATED, ZipFile
+                  from fontTools.ttLib import TTFont
+
+                  root = Path('build/otf')
+                  names = ('MK8DNum-Regular.otf', 'MK8DNum-Italic.otf')
+                  tag = os.environ['RELEASE_TAG']
+
+                  assert {f.name for f in root.glob('*.otf')} == set(names)
+
+                  for name, style in zip(names, ('Regular', 'Italic')):
+                      with TTFont(root / name) as font:
+                          assert font['name'].getDebugName(1) == 'MK8DNum'
+                          assert font['name'].getDebugName(2) == style
+                          assert font['name'].getDebugName(5).endswith(
+                              'release ' + tag
+                          )
+
+                  out = Path('dist') / f'MK8DNum-{tag}.zip'
+                  out.parent.mkdir(parents=True, exist_ok=True)
+
+                  with ZipFile(out, 'w', ZIP_DEFLATED, compresslevel=9) as archive:
+                      for name in names:
+                          archive.write(root / name, arcname=name)
+
+                  with ZipFile(out) as archive:
+                      assert archive.namelist() == list(names)
+                      assert archive.testzip() is None
+
+                  print(f'Created {out}')
+                  PYZIP
+
+            - name: Publish GitHub Release
+              if: steps.existing.outputs.exists == 'false'
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  RELEASE_TAG: ${{ steps.version.outputs.tag }}
+              run: |
+                  set -euo pipefail
+
+                  gh release create "$RELEASE_TAG" \
+                    "dist/MK8DNum-${RELEASE_TAG}.zip" \
+                    --title "$RELEASE_TAG" \
+                    --generate-notes \
+                    --target "$GITHUB_SHA"
