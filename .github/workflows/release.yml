@@ -3,7 +3,8 @@ name: Build and Release MK8DNum
 on:
     push:
         branches: [main]
-
+        paths:
+            - "sources/**"
 permissions:
     contents: write
 

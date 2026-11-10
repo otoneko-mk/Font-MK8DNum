@@ -13,7 +13,7 @@ from fontTools.ttLib.tables.O_S_2f_2 import Panose
 from fontTools.ufoLib import UFOReader
 
 ROOT = Path(__file__).resolve().parent
-UFO = ROOT / "sources" / "MK8D-Digital.ufo"
+UFO = ROOT / "sources" / "MK8DNum.ufo"
 
 VERSION = "1.0.0"
 
